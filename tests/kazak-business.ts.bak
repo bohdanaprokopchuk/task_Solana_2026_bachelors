@@ -1,0 +1,293 @@
+import * as anchor from "@coral-xyz/anchor";
+import { expect } from "chai";
+import {
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
+  getAssociatedTokenAddressSync,
+  getAccount,
+} from "@solana/spl-token";
+import { Keypair, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY, Transaction } from "@solana/web3.js";
+
+const MPL_TOKEN_METADATA_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+
+describe("kazak-business", () => {
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+
+  const resourceManager = anchor.workspace.ResourceManager as anchor.Program<any>;
+  const itemNft = anchor.workspace.ItemNft as anchor.Program<any>;
+  const search = anchor.workspace.Search as anchor.Program<any>;
+  const crafting = anchor.workspace.Crafting as anchor.Program<any>;
+  const marketplace = anchor.workspace.Marketplace as anchor.Program<any>;
+  const magicToken = anchor.workspace.MagicToken as anchor.Program<any>;
+
+  const admin = provider.wallet as anchor.Wallet;
+  const player = Keypair.generate();
+
+  const resourceMints = Array.from({ length: 6 }, () => Keypair.generate());
+  const magicMint = Keypair.generate();
+
+  const [resourceConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("resource-config")],
+    resourceManager.programId,
+  );
+  const [resourceManagerAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("resource-manager-authority")],
+    resourceManager.programId,
+  );
+  const [itemConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("item-config")],
+    itemNft.programId,
+  );
+  const [itemAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("item-authority")],
+    itemNft.programId,
+  );
+  const [magicConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("magic-config")],
+    magicToken.programId,
+  );
+  const [magicMintAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("magic-mint-authority")],
+    magicToken.programId,
+  );
+  const [searchAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("search-authority")],
+    search.programId,
+  );
+  const [craftingAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("crafting-authority")],
+    crafting.programId,
+  );
+  const [marketplaceAuthority] = PublicKey.findProgramAddressSync(
+    [Buffer.from("marketplace-authority")],
+    marketplace.programId,
+  );
+  const [playerPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("player"), player.publicKey.toBuffer()],
+    search.programId,
+  );
+
+  const itemNonce = new anchor.BN(1);
+  const [itemRecordPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("item-record"), player.publicKey.toBuffer(), itemNonce.toArrayLike(Buffer, "le", 8)],
+    itemNft.programId,
+  );
+  const [itemMintPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("item-mint"), itemRecordPda.toBuffer()],
+    itemNft.programId,
+  );
+  const [metadataPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("metadata"), MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(), itemMintPda.toBuffer()],
+    MPL_TOKEN_METADATA_PROGRAM_ID,
+  );
+  const [editionPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("metadata"), MPL_TOKEN_METADATA_PROGRAM_ID.toBuffer(), itemMintPda.toBuffer(), Buffer.from("edition")],
+    MPL_TOKEN_METADATA_PROGRAM_ID,
+  );
+
+  const itemPrices = [10, 15, 25, 40];
+
+  async function airdrop(pubkey: PublicKey, sol = 5) {
+    const sig = await provider.connection.requestAirdrop(pubkey, sol * anchor.web3.LAMPORTS_PER_SOL);
+    await provider.connection.confirmTransaction(sig, "confirmed");
+  }
+
+  function playerResourceAta(mint: PublicKey) {
+    return getAssociatedTokenAddressSync(mint, player.publicKey, false, TOKEN_2022_PROGRAM_ID);
+  }
+
+  function playerMagicAta() {
+    return getAssociatedTokenAddressSync(magicMint.publicKey, player.publicKey, false, TOKEN_2022_PROGRAM_ID);
+  }
+
+  function playerItemAta() {
+    return getAssociatedTokenAddressSync(itemMintPda, player.publicKey, false, TOKEN_PROGRAM_ID);
+  }
+
+  it("runs full local flow", async () => {
+    await airdrop(player.publicKey, 3);
+
+    await resourceManager.methods
+      .initializeConfig(searchAuthority, craftingAuthority, itemPrices)
+      .accounts({
+        admin: admin.publicKey,
+        config: resourceConfigPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    await itemNft.methods
+      .initializeConfig(craftingAuthority, marketplaceAuthority)
+      .accounts({
+        admin: admin.publicKey,
+        config: itemConfigPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    await magicToken.methods
+      .initializeConfig(marketplaceAuthority)
+      .accounts({
+        admin: admin.publicKey,
+        config: magicConfigPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .rpc();
+
+    for (const [idx, mint] of resourceMints.entries()) {
+      await resourceManager.methods
+        .initResourceMint(
+          idx,
+          ["Wood", "Iron", "Gold", "Leather", "Stone", "Diamond"][idx],
+          ["WOOD", "IRON", "GOLD", "LEATHER", "STONE", "DIAMOND"][idx],
+          `https://example.com/resource/${idx}.json`,
+        )
+        .accounts({
+          admin: admin.publicKey,
+          config: resourceConfigPda,
+          resourceMint: mint.publicKey,
+          resourceManagerAuthority,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([mint])
+        .rpc();
+    }
+
+    await magicToken.methods
+      .initializeMint(
+        "MagicToken",
+        "MAGIC",
+        "https://example.com/magic.json",
+      )
+      .accounts({
+        admin: admin.publicKey,
+        config: magicConfigPda,
+        magicMint: magicMint.publicKey,
+        magicMintAuthority,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([magicMint])
+      .rpc();
+
+    await search.methods
+      .initializePlayer()
+      .accounts({
+        owner: player.publicKey,
+        player: playerPda,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([player])
+      .rpc();
+
+    const createAtasTx = new Transaction();
+    for (const mint of resourceMints) {
+      createAtasTx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          admin.publicKey,
+          playerResourceAta(mint.publicKey),
+          player.publicKey,
+          mint.publicKey,
+          TOKEN_2022_PROGRAM_ID,
+        ),
+      );
+    }
+    createAtasTx.add(
+      createAssociatedTokenAccountIdempotentInstruction(
+        admin.publicKey,
+        playerMagicAta(),
+        player.publicKey,
+        magicMint.publicKey,
+        TOKEN_2022_PROGRAM_ID,
+      ),
+    );
+    await provider.sendAndConfirm(createAtasTx, []);
+
+    const searchRemainingAccounts = resourceMints.flatMap((mint) => [
+      { pubkey: mint.publicKey, isWritable: true, isSigner: false },
+      { pubkey: playerResourceAta(mint.publicKey), isWritable: true, isSigner: false },
+    ]);
+
+    await search.methods
+      .searchResources()
+      .accounts({
+        owner: player.publicKey,
+        player: playerPda,
+        searchAuthority,
+        resourceConfig: resourceConfigPda,
+        resourceManagerAuthority,
+        resourceManagerProgram: resourceManager.programId,
+        tokenProgram: TOKEN_2022_PROGRAM_ID,
+      })
+      .remainingAccounts(searchRemainingAccounts)
+      .signers([player])
+      .rpc();
+
+    let totalResources = 0n;
+    for (const mint of resourceMints) {
+      const account = await getAccount(provider.connection, playerResourceAta(mint.publicKey), "confirmed", TOKEN_2022_PROGRAM_ID);
+      totalResources += account.amount;
+    }
+    expect(totalResources).to.equal(3n);
+
+    await new Promise((resolve) => setTimeout(resolve, 61_000));
+
+    const itemAta = playerItemAta();
+
+    await crafting.methods
+      .craftItem(0, itemNonce, "https://example.com/items/saber.json")
+      .accounts({
+        owner: player.publicKey,
+        craftingAuthority,
+        resourceConfig: resourceConfigPda,
+        resourceManagerAuthority,
+        itemNftConfig: itemConfigPda,
+        itemAuthority,
+        itemRecord: itemRecordPda,
+        itemMint: itemMintPda,
+        ownerItemTokenAccount: itemAta,
+        metadataAccount: metadataPda,
+        masterEdition: editionPda,
+        metadataProgram: MPL_TOKEN_METADATA_PROGRAM_ID,
+        resourceManagerProgram: resourceManager.programId,
+        itemNftProgram: itemNft.programId,
+        token2022Program: TOKEN_2022_PROGRAM_ID,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: anchor.utils.token.ASSOCIATED_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        rent: SYSVAR_RENT_PUBKEY,
+      })
+      .remainingAccounts(searchRemainingAccounts)
+      .signers([player])
+      .rpc();
+
+    await marketplace.methods
+      .redeemItem()
+      .accounts({
+        seller: player.publicKey,
+        marketplaceAuthority,
+        resourceConfig: resourceConfigPda,
+        itemNftConfig: itemConfigPda,
+        magicTokenConfig: magicConfigPda,
+        magicMintAuthority,
+        itemRecord: itemRecordPda,
+        itemMint: itemMintPda,
+        sellerItemTokenAccount: itemAta,
+        magicMint: magicMint.publicKey,
+        sellerMagicTokenAccount: playerMagicAta(),
+        itemNftProgram: itemNft.programId,
+        magicTokenProgram: magicToken.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        token2022Program: TOKEN_2022_PROGRAM_ID,
+      })
+      .signers([player])
+      .rpc();
+
+    const magicBalance = await getAccount(provider.connection, playerMagicAta(), "confirmed", TOKEN_2022_PROGRAM_ID);
+    expect(Number(magicBalance.amount)).to.equal(itemPrices[0]);
+  });
+});

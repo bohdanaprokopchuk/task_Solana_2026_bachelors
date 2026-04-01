@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    "programs/resource_manager",
+    "programs/item_nft",
+    "programs/crafting",
+    "programs/search",
+    "programs/marketplace",
+    "programs/magic_token",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+
+[workspace.dependencies]
+anchor-lang = { version = "=0.31.1", features = ["init-if-needed"] }
+anchor-spl = { version = "=0.31.1", features = ["associated_token", "token", "token_2022"] }
+mpl-token-metadata = "=5.1.1"
+spl-token = { version = "=7.0.0", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "=6.0.0", features = ["no-entrypoint"] }
+spl-token-metadata-interface = "=0.7.0"
+
+[profile.release]
+overflow-checks = true

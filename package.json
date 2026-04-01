@@ -1,0 +1,31 @@
+{
+  "name": "kazak-business-solana",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "prettier --check .",
+    "test": "anchor test",
+    "bootstrap:localnet": "ts-node scripts/bootstrap.ts --cluster localnet",
+    "bootstrap:devnet": "ts-node scripts/bootstrap.ts --cluster devnet"
+  },
+  "dependencies": {
+    "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
+    "@solana/spl-token": "^0.4.13",
+    "@solana/web3.js": "^1.95.4",
+    "dotenv": "^16.4.5",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "0.30.1",
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.10.5",
+    "chai": "^4.5.0",
+    "mocha": "^11.7.5",
+    "prettier": "^3.4.2",
+    "ts-mocha": "^11.1.0",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.7.2"
+  }
+}
